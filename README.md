@@ -1,5 +1,7 @@
 # TF_isoforms_enrichment_analysis
 
+Authors: Marcelo Falchetti, Stephanie Wang
+
 - [ ] Create a Seurat object for every TF isoform (3,548 annotated splice isoforms)
 
 - [ ] Get clusters (transcriptional states) for every TF isoform (check code block)
