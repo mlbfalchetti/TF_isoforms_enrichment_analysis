@@ -1,12 +1,17 @@
 # TF_isoforms_enrichment_analysis
 
 [] Create a Seurat object for every TF isoform (3,548 annotated splice isoforms)
+
 [] Get clusters (transcriptional states) for every TF isoform
+
 [] For every cluster get a pseudobulk sample (with the normalized data; "rowMeans")
 
 Output: For every TF isoform a matrix of 
+
   ncol = number of clusters
+  
   nrow = number of genes
+  
   matrix' cells = rowMeans of normalized expression
 
 ```r
