@@ -15,12 +15,37 @@ Output: For every TF isoform a matrix of
   matrix' cells = rowMeans of normalized expression
 
 ```r
-seurat <- CreateSeuratObject(counts = counts, min.cells = 0, min.features = 0)
-seurat <- NormalizeData(seurat)
-seurat <- FindVariableFeatures(seurat, selection.method = "vst", nfeatures = 2000)
-seurat <- ScaleData(seurat, features = rownames(seurat))
-seurat <- RunPCA(seurat, features = VariableFeatures(object = seurat))
-seurat <- FindNeighbors(seurat, dims = 1:10)
-seurat <- FindClusters(seurat, resolution = 0.5)
-seurat <- RunUMAP(seurat, dims = 1:10)
+seurat <- CreateSeuratObject(
+  counts = counts, 
+  min.cells = 0, 
+  min.features = 0
+  )
+seurat <- NormalizeData(
+  seurat
+  )
+seurat <- FindVariableFeatures(
+  seurat, 
+  selection.method = "vst", 
+  nfeatures = 2000
+  )
+seurat <- ScaleData(
+  seurat, 
+  features = rownames(seurat)
+  )
+seurat <- RunPCA(
+  seurat, 
+  features = VariableFeatures(object = seurat)
+  )
+seurat <- FindNeighbors(
+  seurat, 
+  dims = 1:10
+  )
+seurat <- FindClusters(
+  seurat, 
+  resolution = 0.5
+  )
+seurat <- RunUMAP(
+  seurat, 
+  dims = 1:10
+  )
 ```
