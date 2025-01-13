@@ -19,8 +19,16 @@ Output: For every TF isoform a matrix of:
 ```r
 seurat <- CreateSeuratObject(
   counts = counts, 
-  min.cells = 0, 
+  min.cells = ncol(counts) * 0.05, 
   min.features = 0
+  )
+seurat[["percent.mt"]] <- PercentageFeatureSet(
+  seurat, 
+  pattern = "^MT-"
+  )
+seurat <- subset(
+  seurat, 
+  subset = nFeature_RNA > 400 & nFeature_RNA < 7000 & percent.mt < 10
   )
 seurat <- NormalizeData(
   seurat
@@ -60,5 +68,3 @@ seurat_pseudobulk <- AggregateExpression(
   group.by = "seurat_clusters"
   )
 ```
-
-[...] Cells with 400-7,000 detected genes and less than 10% total mitochondrial gene expression were retained for analysis. Genes that were detected in fewer than 3 cells were removed.
