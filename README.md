@@ -6,7 +6,7 @@
 
 - [ ] For every cluster get a pseudobulk sample (with the normalized data; "rowMeans")
 
-Output: For every TF isoform a matrix of 
+Output: For every TF isoform a matrix of:
 
 - [ ] ncol = number of clusters
   
