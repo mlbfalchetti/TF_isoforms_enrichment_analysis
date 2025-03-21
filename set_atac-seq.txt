@@ -1,0 +1,64 @@
+prefetch SRR28983752
+
+fasterq-dump SRR28983752 -S -e 8 -p
+
+# conda install -c bioconda fastp
+
+fastp -i SRR28983752_1.fastq -I SRR28983752_2.fastq \
+      -o trimmed_1.fastq -O trimmed_2.fastq \
+      --detect_adapter_for_pe --length_required 30 \
+      --html fastp_report.html --json fastp_report.json
+
+bowtie2 -q -X 300 -p 8 \
+    -x ./hg38_index \
+    -1 trimmed_1.fastq -2 trimmed_2.fastq \
+    -S aligned.sam
+
+# conda install -c bioconda samtools OR sudo apt install samtools
+
+samtools view -bS aligned.sam | samtools sort -o aligned_sorted.bam
+samtools index aligned_sorted.bam
+
+samtools idxstats aligned_sorted.bam | cut -f 1 | grep -Ev 'chrM|chrY' | \
+xargs samtools view -b aligned_sorted.bam > aligned_noMTchrY.bam
+samtools index aligned_noMTchrY.bam
+
+picard AddOrReplaceReadGroups \
+    I=aligned_noMTchrY.bam \
+    O=aligned_rg.bam \
+    RGID=1 \
+    RGLB=lib1 \
+    RGPL=ILLUMINA \
+    RGPU=unit1 \
+    RGSM=sample1
+
+picard MarkDuplicates \
+    I=aligned_rg.bam \
+    O=aligned_rmdup.bam \
+    M=metrics.txt \
+    REMOVE_DUPLICATES=true
+
+samtools index aligned_rmdup.bam
+
+macs2 callpeak -t aligned_rmdup.bam -f BAMPE -g hs -n peaks --outdir macs2_output
+
+wget https://raw.githubusercontent.com/Boyle-Lab/Blacklist/master/lists/hg38-blacklist.v2.bed
+bedtools intersect -v -a macs2_output/peaks_peaks.narrowPeak -b hg38-blacklist.v2.bed > peaks_filtered.bed
+
+awk 'BEGIN{OFS="\t"} {center=int(($2+$3)/2); print $1, center-150, center+150}' peaks_filtered.bed > accessible_regions.bed
+
+wget ftp://ftp.ensembl.org/pub/release-110/gtf/homo_sapiens/Homo_sapiens.GRCh38.110.gtf.gz
+gunzip Homo_sapiens.GRCh38.110.gtf.gz
+
+awk '$3 == "gene"' Homo_sapiens.GRCh38.110.gtf | \
+awk '{OFS="\t"; if ($7=="+") print $1, $4-10000, $4+10000, $9; else print $1, $5-10000, $5+10000, $9}' > gene_tss_20kb.bed
+
+bedtools intersect -a accessible_regions.bed -b gene_tss_20kb.bed -wa -wb > peaks_to_genes.bed
+
+featureCounts -T 8 -a Homo_sapiens.GRCh38.110.gtf -o gene_counts.txt \
+  -F GTF -t exon -g gene_name aligned_rmdup.bam
+
+library(Seurat)
+
+counts <- read.table("gene_fragment_counts.txt", header = TRUE, row.names = 1)
+seurat_obj <- CreateSeuratObject(counts = counts)
