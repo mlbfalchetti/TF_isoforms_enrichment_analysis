@@ -40,18 +40,48 @@ picard MarkDuplicates \
 
 samtools index aligned_rmdup.bam
 
+conda config --set solver classic
+#conda create -n macs2_py38 -c bioconda -c conda-forge python=3.8 macs2
+conda activate macs2_py38
+macs2 --version
 macs2 callpeak -t aligned_rmdup.bam -f BAMPE -g hs -n peaks --outdir macs2_output
 
-wget https://raw.githubusercontent.com/Boyle-Lab/Blacklist/master/lists/hg38-blacklist.v2.bed
+wget https://github.com/Boyle-Lab/Blacklist/raw/master/lists/hg38-blacklist.v2.bed.gz
+gunzip hg38-blacklist.v2.bed.gz
+
+# conda install -c bioconda bedtools
 bedtools intersect -v -a macs2_output/peaks_peaks.narrowPeak -b hg38-blacklist.v2.bed > peaks_filtered.bed
+
+awk '{ $1 = "chr" $1; print }' OFS="\t" macs2_output/peaks_peaks.narrowPeak > peaks_with_chr.narrowPeak
+bedtools intersect -v -a peaks_with_chr.narrowPeak -b hg38-blacklist.v2.bed > peaks_filtered.bed
 
 awk 'BEGIN{OFS="\t"} {center=int(($2+$3)/2); print $1, center-150, center+150}' peaks_filtered.bed > accessible_regions.bed
 
 wget ftp://ftp.ensembl.org/pub/release-110/gtf/homo_sapiens/Homo_sapiens.GRCh38.110.gtf.gz
 gunzip Homo_sapiens.GRCh38.110.gtf.gz
 
+#awk '$3 == "gene"' Homo_sapiens.GRCh38.110.gtf | \
+#awk '{OFS="\t"; if ($7=="+") print $1, $4-10000, $4+10000, $9; else print $1, $5-10000, $5+10000, $9}' > gene_tss_20kb.bed
+
 awk '$3 == "gene"' Homo_sapiens.GRCh38.110.gtf | \
-awk '{OFS="\t"; if ($7=="+") print $1, $4-10000, $4+10000, $9; else print $1, $5-10000, $5+10000, $9}' > gene_tss_20kb.bed
+awk '{
+  match($0, /gene_name "([^"]+)"/, a);  # captura gene_name
+  gene=a[1];
+  start=($7 == "+" ? $4 - 10000 : $5 - 10000); 
+  end=($7 == "+" ? $4 + 10000 : $5 + 10000);
+  if (start < 0) start = 0;
+  print $1, start, end, gene
+}' OFS="\t" > gene_tss_20kb.bed
+bedtools intersect -a accessible_regions.bed -b gene_tss_20kb.bed -wa -wb > peaks_to_genes.bed
+awk 'NF==7 && $7 != "" {print $1, $2, $3, $7}' OFS="\t" peaks_to_genes.bed > peaks_annotated.bed
+bedtools intersect -a peaks_annotated.bed -b aligned_rmdup.bam -c > gene_peak_counts.bed
+
+
+
+
+
+
+
 
 bedtools intersect -a accessible_regions.bed -b gene_tss_20kb.bed -wa -wb > peaks_to_genes.bed
 
