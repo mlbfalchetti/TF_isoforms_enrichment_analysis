@@ -1,94 +1,69 @@
-prefetch SRR28983752
+Pré-requisitos na pasta:
+SRR28983752_1.fastq e SRR28983752_2.fastq
+Genoma: Homo_sapiens.GRCh38.dna.primary_assembly.fa
+GTF: Homo_sapiens.GRCh38.110.gtf
+Blacklists: hg38-blacklist.v2.bed
 
-fasterq-dump SRR28983752 -S -e 8 -p
-
-# conda install -c bioconda fastp
-
+# 1. Trimming dos reads com fastp
 fastp -i SRR28983752_1.fastq -I SRR28983752_2.fastq \
       -o trimmed_1.fastq -O trimmed_2.fastq \
-      --detect_adapter_for_pe --length_required 30 \
-      --html fastp_report.html --json fastp_report.json
+      --thread 8 --detect_adapter_for_pe --html fastp_report.html --json fastp_report.json
 
-bowtie2 -q -X 300 -p 8 \
-    -x ./hg38_index \
-    -1 trimmed_1.fastq -2 trimmed_2.fastq \
-    -S aligned.sam
+# 2. Alinhamento com bowtie2
+wget https://sourceforge.net/projects/bowtie-bio/files/bowtie2/2.5.1/bowtie2-2.5.1-linux-x86_64.zip
+unzip bowtie2-2.5.1-linux-x86_64.zip
+cd bowtie2-2.5.1-linux-x86_64
+export PATH=$PWD:$PATH
+bowtie2 -q -X 300 --sam --chunkmbs 512 \
+  -x hg38_index \
+  -1 trimmed_1.fastq -2 trimmed_2.fastq \
+  -S aligned.sam
 
-# conda install -c bioconda samtools OR sudo apt install samtools
+# 3. Conversão, ordenação e remoção de reads de chrM e chrY
+# Converter para BAM e ordenar
+samtools view -Sb aligned.sam | samtools sort -o aligned_sorted.bam
 
-samtools view -bS aligned.sam | samtools sort -o aligned_sorted.bam
+# Indexar
 samtools index aligned_sorted.bam
 
-samtools idxstats aligned_sorted.bam | cut -f 1 | grep -Ev 'chrM|chrY' | \
-xargs samtools view -b aligned_sorted.bam > aligned_noMTchrY.bam
+VEJA HEAD!
+
+# Remover chrM e chrY
+samtools idxstats aligned_sorted.bam | cut -f1 | grep -v -E 'chrM|MT|chrY|Y' > keep_chroms.txt
+samtools view -b aligned_sorted.bam $(cat keep_chroms.txt) > aligned_noMTchrY.bam
+
+# Ordenar e indexar novamente
+samtools sort -o aligned_noMTchrY.bam aligned_noMTchrY.bam
 samtools index aligned_noMTchrY.bam
 
-picard AddOrReplaceReadGroups \
-    I=aligned_noMTchrY.bam \
-    O=aligned_rg.bam \
-    RGID=1 \
-    RGLB=lib1 \
-    RGPL=ILLUMINA \
-    RGPU=unit1 \
-    RGSM=sample1
+# 4. Remoção de duplicatas
+samtools rmdup aligned_noMTchrY.bam aligned_rmdup.bam
 
-picard MarkDuplicates \
-    I=aligned_rg.bam \
-    O=aligned_rmdup.bam \
-    M=metrics.txt \
-    REMOVE_DUPLICATES=true
+# 5. Chamada de picos com MACS2
+macs2 callpeak -t aligned_rmdup.bam -f BAMPE -g hs -n peaks \
+  --outdir macs2_output --nomodel --keep-dup all \
+  --shift -37 --extsize 73 -q 0.01
 
-samtools index aligned_rmdup.bam
+# 6. Expandir os picos (summits ±150bp)
+awk 'OFS="\t" {center = int(($2 + $3)/2); start = center - 150; if (start < 0) start = 0; end = center + 150; print $1, start, end}' \
+  macs2_output/peaks_peaks.narrowPeak > accessible_regions.bed
 
-conda config --set solver classic
-#conda create -n macs2_py38 -c bioconda -c conda-forge python=3.8 macs2
-conda activate macs2_py38
-macs2 --version
-macs2 callpeak -t aligned_rmdup.bam -f BAMPE -g hs -n peaks --outdir macs2_output
+# 7. Remover regiões blacklist do ENCODE
+# Remover regiões com sobreposição ao blacklist
+bedtools intersect -a accessible_regions.bed -b hg38-blacklist.v2.bed -v > peaks_filtered.bed
 
-wget https://github.com/Boyle-Lab/Blacklist/raw/master/lists/hg38-blacklist.v2.bed.gz
-gunzip hg38-blacklist.v2.bed.gz
-
-# conda install -c bioconda bedtools
-bedtools intersect -v -a macs2_output/peaks_peaks.narrowPeak -b hg38-blacklist.v2.bed > peaks_filtered.bed
-
-awk '{ $1 = "chr" $1; print }' OFS="\t" macs2_output/peaks_peaks.narrowPeak > peaks_with_chr.narrowPeak
-bedtools intersect -v -a peaks_with_chr.narrowPeak -b hg38-blacklist.v2.bed > peaks_filtered.bed
-
-awk 'BEGIN{OFS="\t"} {center=int(($2+$3)/2); print $1, center-150, center+150}' peaks_filtered.bed > accessible_regions.bed
-
-wget ftp://ftp.ensembl.org/pub/release-110/gtf/homo_sapiens/Homo_sapiens.GRCh38.110.gtf.gz
-gunzip Homo_sapiens.GRCh38.110.gtf.gz
-
-#awk '$3 == "gene"' Homo_sapiens.GRCh38.110.gtf | \
-#awk '{OFS="\t"; if ($7=="+") print $1, $4-10000, $4+10000, $9; else print $1, $5-10000, $5+10000, $9}' > gene_tss_20kb.bed
-
+# 8. Criar janela TSS ±10kb por gene
 awk '$3 == "gene"' Homo_sapiens.GRCh38.110.gtf | \
 awk '{
-  match($0, /gene_name "([^"]+)"/, a);  # captura gene_name
-  gene=a[1];
-  start=($7 == "+" ? $4 - 10000 : $5 - 10000); 
+  match($0, /gene_name "([^"]+)"/, a); gene=a[1];
+  start=($7 == "+" ? $4 - 10000 : $5 - 10000);
   end=($7 == "+" ? $4 + 10000 : $5 + 10000);
   if (start < 0) start = 0;
   print $1, start, end, gene
 }' OFS="\t" > gene_tss_20kb.bed
-bedtools intersect -a accessible_regions.bed -b gene_tss_20kb.bed -wa -wb > peaks_to_genes.bed
+
+# 9. Associar picos a genes
+bedtools intersect -a peaks_filtered.bed -b gene_tss_20kb.bed -wa -wb > peaks_to_genes.bed
+
+# Filtrar apenas os com nomes de gene
 awk 'NF==7 && $7 != "" {print $1, $2, $3, $7}' OFS="\t" peaks_to_genes.bed > peaks_annotated.bed
-bedtools intersect -a peaks_annotated.bed -b aligned_rmdup.bam -c > gene_peak_counts.bed
-
-
-
-
-
-
-
-
-bedtools intersect -a accessible_regions.bed -b gene_tss_20kb.bed -wa -wb > peaks_to_genes.bed
-
-featureCounts -T 8 -a Homo_sapiens.GRCh38.110.gtf -o gene_counts.txt \
-  -F GTF -t exon -g gene_name aligned_rmdup.bam
-
-library(Seurat)
-
-counts <- read.table("gene_fragment_counts.txt", header = TRUE, row.names = 1)
-seurat_obj <- CreateSeuratObject(counts = counts)
