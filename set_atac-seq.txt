@@ -90,28 +90,22 @@ bedtools intersect -a peaks_annotated.bed -b fragments_clean.bed -c > gene_peak_
 
 
 
+awk 'OFS="\t" {center = int(($2 + $3)/2); start = center - 150; if (start < 0) start = 0; end = center + 150; print $1, start, end}' \
+  ~/tf_atlas/GSM3562016_LT_HSC.narrowPeak/GSM3562016_LT_HSC.narrowPeak > accessible_regions.bed
+bedtools intersect -a accessible_regions.bed -b hg38-blacklist.v2.bed -v > peaks_filtered.bed
+awk '$3 == "gene"' gencode.v19.annotation.gtf | \
+awk '{
+  match($0, /gene_name "([^"]+)"/, a); gene=a[1];
+  start=($7 == "+" ? $4 - 10000 : $5 - 10000);
+  end=($7 == "+" ? $4 + 10000 : $5 + 10000);
+  if (start < 0) start = 0;
+  print $1, start, end, gene
+}' OFS="\t" > gene_tss_20kb_hg19.bed
+bedtools intersect -a peaks_filtered.bed -b gene_tss_20kb_hg19.bed -wa -wb > peaks_to_genes.bed
+awk 'OFS="\t" {print $1, $2, $3, $7}' peaks_to_genes.bed > peaks_annotated.bed
 
-# 9. Associar picos a genes
-bedtools intersect -a peaks_filtered.bed -b gene_tss_20kb.bed -wa -wb > peaks_to_genes.bed
-
-# Filtrar apenas os com nomes de gene
-awk 'NF==7 && $7 != "" {print $1, $2, $3, $7}' OFS="\t" peaks_to_genes.bed > peaks_annotated.bed
-
-
-
-
-samtools view -h -f 0x2 aligned_noMTchrY.bam | samtools sort -n -o aligned_by_name_paired.bam
-
-
-# Converter para BEDPE
-bedtools bamtobed -bedpe -i aligned_by_name_paired.bam > atac_fragments.bed
-
-awk '$1 != "." && $2 >= 0 && $6 >= 0 {
-  start = ($2 < $6 ? $2 : $6);
-  end = ($2 > $6 ? $2 : $6);
-  print $1, start, end
-}' OFS="\t" atac_fragments.bed > fragments_clean.bed
-
-
-bedtools intersect -a peaks_annotated.bed -b fragments_clean.bed -c > gene_peak_counts.bed
-
+awk 'OFS="\t" {center = int(($2 + $3)/2); start = center - 150; if (start < 0) start = 0; end = center + 150; print $1, start, end, $7}' \
+  ~/tf_atlas/GSM3562016_LT_HSC.narrowPeak/GSM3562016_LT_HSC.narrowPeak > accessible_regions_with_signal.bed
+bedtools intersect -a accessible_regions_with_signal.bed -b hg38-blacklist.v2.bed -v > peaks_filtered_with_signal.bed
+bedtools intersect -a peaks_filtered_with_signal.bed -b gene_tss_20kb_hg19.bed -wa -wb > peaks_to_genes_with_signal.bed
+awk 'OFS="\t" {print $1, $2, $3, $8, $4}' peaks_to_genes_with_signal.bed > peaks_annotated_with_signal.bed
